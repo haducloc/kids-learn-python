@@ -3,14 +3,15 @@ import tkinter.messagebox
 import random
 
 class Caro:
-    GRID_SIZE = 32          # Number of rows and columns on the board
+    GRID_SIZE = 24          # Number of rows and columns on the board
     WIN_LENGTH = 5          # Number of symbols in a row needed to win
-    CELL_SIZE = 24          # Size of each cell in pixels
+    CELL_SIZE = 32          # Size of each cell in pixels
 
     def __init__(self):
         # Initialize main window
         self.window = tk.Tk()
         self.window.title("Cờ Caro - 5 in a Row (Canvas)")
+        self.window.resizable(False, False)
 
         # Create canvas to draw the board
         self.canvas = tk.Canvas(

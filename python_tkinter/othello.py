@@ -25,6 +25,7 @@ class Othello:
         # Set up main window
         self.window = tk.Tk()
         self.window.title("Othello - Developed by Loc Ha")
+        self.window.resizable(False, False)
 
         # Display status message (e.g., player's turn or game over)
         self.message_label = tk.Label(self.window, text="", font=('normal', 16))
