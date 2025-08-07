@@ -19,8 +19,8 @@ def search_employees(
         params.append(f"%{name}%")
 
     if dob is not None:
-        query += " AND DATE(dob) = ?"
-        params.append(dob.isoformat())
+        query += " AND dob = ?"
+        params.append(dob.strftime("%Y-%m-%d"))
 
     if user_type is not None:
         query += " AND user_type = ?"
