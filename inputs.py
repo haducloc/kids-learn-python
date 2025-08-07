@@ -1,49 +1,90 @@
-##### Define all my re-use functions #####
-##### All re-use .py files should be in the root folder #####
+# =========================
+# Reusable CLI Input Utils (No Advanced Type Hints)
+# Author: Loc Ha
+# =========================
 
 from datetime import datetime
 import re
+import parse_util
 
-def __parse_date(str):
-    return datetime.strptime(str, f"%m/%d/%Y")
 
-def __parse_bool(str):
-    if str == "true" or str == "yes" or str == "y":
-        return True
-    if str == "false" or str == "no" or str == "n":
-        return False
-    raise "Could not convert the given str into True/False. Possible values: true|false|yes|no|y|n" 
-
-def __input(var_name, type_converter=None, required=True, validator = None):
+# --- Core function to get and parse a single input value ---
+def __input(var_name, type_converter=None, required=True, validator=None):
     failed = False
     while True:
-        # input
         if failed:
             print(f"ERROR: Invalid {var_name}.")
-        str = input(f">>> Enter {var_name}: ")
-        str = str.strip()
 
-        # optional?
-        if not required:
-            if str == "":
-                return None
+        # Prompt user and strip whitespace
+        value_str = input(f">>> Enter {var_name}: ").strip()
 
-        # convert
+        # Return None for optional empty input
+        if not required and value_str == "":
+            return None
+
+        # Attempt conversion using the type_converter
         try:
-            parsedVal = str if type_converter is None else type_converter(str)
-        except:
+            parsed_val = value_str if type_converter is None else type_converter(value_str)
+        except Exception:
             failed = True
             continue
 
-        # validate
-        if validator is None:
-            return parsedVal
-        valid = validator(parsedVal)
-
-        if not valid:
-            failed = True
+        # If no validator or it passes, return the result
+        if validator is None or validator(parsed_val):
+            return parsed_val
         else:
-            return parsedVal
+            failed = True
+
+
+# --- Core function to get and parse a comma-separated list ---
+def __input_list(var_name, type_converter=None, required=True, validator=None):
+    failed = False
+    while True:
+        if failed:
+            print(f"ERROR: Invalid {var_name}.")
+            failed = False
+
+        value_str = input(f">>> Enter {var_name}: ").strip()
+
+        # Split on unescaped commas
+        items = re.split(r"(?<!\\),", value_str)
+
+        # Return empty list if optional and no input
+        if not required and not value_str:
+            return []
+
+        result = []
+        for item in items:
+            item = item.replace(r"\,", ",").strip()  # Unescape any escaped commas
+
+            try:
+                # Allow empty item to become None
+                if item == "":
+                    result.append(None)
+                else:
+                    parsed_val = item if type_converter is None else type_converter(item)
+                    result.append(parsed_val)
+            except Exception:
+                failed = True
+                break
+
+        if failed:
+            continue
+
+        # Validate each item if validator provided
+        if validator:
+            for parsed_val in result:
+                if not validator(parsed_val):
+                    failed = True
+                    break
+
+            if failed:
+                continue
+
+        return result
+
+
+# === SINGLE VALUE INPUTS ===
 
 def input_int(var_name, required=True, validator=None):
     return __input(var_name, int, required, validator)
@@ -52,76 +93,28 @@ def input_float(var_name, required=True, validator=None):
     return __input(var_name, float, required, validator)
 
 def input_string(var_name, required=True, validator=None):
-   return __input(var_name, None, required, validator)
+    return __input(var_name, None, required, validator)
 
 def input_bool(var_name):
-    return __input(var_name, __parse_bool, True, None)    
+    return __input(var_name, parse_util.parse_bool, True, None)
 
 def input_date(var_name, required=True, validator=None):
-   return __input(var_name, __parse_date, required, validator)   
+    return __input(var_name, parse_util.parse_date, required, validator)
 
-def __input_list(var_name, type_converter=None, required=True, validator = None):
-    failed = False
-    while True:
-        # input
-        if failed:
-            print(f"ERROR: Invalid {var_name}.")
-            failed = False
-        
-        str = input(f">>> Enter {var_name}: ")
-        str = str.strip()
-        items = re.split("(?<!\\\\),", str)
 
-        # optional?
-        if not required:
-            if len(items) == 0:
-                return items
+# === LIST VALUE INPUTS ===
 
-        # convert
-        list = []
-        for item in items:
-            item = item.replace("\,", ",")
-            try:
-                item = item.strip()
-                if item == "":
-                    list.append(None)
-                else:
-                    parsedVal = item if type_converter is None else type_converter(item)
-                    list.append(parsedVal)
-            except:
-                failed = True
-                break
-
-        if failed:
-            continue
-
-        # validate
-        if validator is None:
-            return list
-        
-        for parsedVal in list:
-            valid = validator(parsedVal)
-
-            if not valid:
-                failed = True
-                break
-
-        if failed:
-            continue
-
-        return list
-
-def input_ints(var_name, required=True, validator = None):
+def input_ints(var_name, required=True, validator=None):
     return __input_list(var_name, int, required, validator)
 
-def input_floats(var_name, required=True, validator = None):
+def input_floats(var_name, required=True, validator=None):
     return __input_list(var_name, float, required, validator)
 
-def input_strings(var_name, required=True, validator = None):
+def input_strings(var_name, required=True, validator=None):
     return __input_list(var_name, None, required, validator)
 
-def input_bools(var_name, required=True, validator = None):
-    return __input_list(var_name, __parse_bool, required, validator)
+def input_bools(var_name, required=True, validator=None):
+    return __input_list(var_name, parse_util.parse_bool, required, validator)
 
-def input_dates(var_name, required=True, validator = None):
-    return __input_list(var_name, __parse_date, required, validator)    
+def input_dates(var_name, required=True, validator=None):
+    return __input_list(var_name, parse_util.parse_date, required, validator)
