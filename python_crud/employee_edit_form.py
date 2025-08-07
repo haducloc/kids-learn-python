@@ -133,4 +133,11 @@ def open_edit_form(
     # --- Auto-focus on the name field for user convenience ---
     name_entry.focus_set()
 
+    # --- Run logic after window is fully loaded ---
+    win.after(0, lambda: on_window_ready(win, user_type_entry))
+
     return win
+
+
+def on_window_ready(win, user_type_entry):
+    print("Edit form window is now visible and ready.")
