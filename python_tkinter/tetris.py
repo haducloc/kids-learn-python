@@ -1,5 +1,6 @@
 import tkinter as tk
 import random
+from math import ceil
 
 class Tetris:
     COLS = 10
@@ -8,12 +9,12 @@ class Tetris:
     TICK_MS = 500  # base gravity (milliseconds between automatic drops)
 
     # Editable key bindings
-    # NOTE: Space now ROTATES clockwise; hard drop is on Shift (left/right).
+    # NOTE: Space rotates clockwise; hard drop is on Shift (left/right).
     KEYS = {
         "left":        ["Left", "a", "A"],
         "right":       ["Right", "d", "D"],
         "down":        ["Down", "s", "S"],            # soft drop
-        "rotate_cw":   ["Up", "x", "X", "space"],     # rotate clockwise  (now includes Space)
+        "rotate_cw":   ["Up", "x", "X", "space"],     # rotate clockwise (includes Space)
         "rotate_ccw":  ["z", "Z"],                    # rotate counter-clockwise
         "hard_drop":   ["Shift_L", "Shift_R"],        # instant drop to bottom
         "pause":       ["p", "P"],
@@ -92,6 +93,9 @@ class Tetris:
         'L': "#FFA500",
     }
 
+    # Base points for line clears (before level multiplier)
+    LINE_POINTS = [0, 100, 300, 500, 800]  # 0..4 lines
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Tetris")
@@ -125,7 +129,14 @@ class Tetris:
         ctrl.pack(pady=8, fill="x")
         tk.Label(
             ctrl,
-            text="←/→: Move\n↓: Soft drop\n↑ / X / Space: Rotate CW\nZ: Rotate CCW\nShift: Hard drop\nP: Pause, R: Restart",
+            text=(
+                "←/→: Move\n"
+                "↓: Soft drop\n"
+                "↑ / X / Space: Rotate CW\n"
+                "Z: Rotate CCW\n"
+                "Shift: Hard drop\n"
+                "P: Pause, R: Restart"
+            ),
             justify="left"
         ).pack(anchor="w")
 
@@ -140,7 +151,7 @@ class Tetris:
 
     # -------------------- Input Binding --------------------
     def bind_keys(self):
-        # Helper to bind multiple key strings to one function
+        # Bind multiple key strings to the same function
         def bind_list(keys, fn):
             for k in keys:
                 if k == "space":
@@ -170,13 +181,12 @@ class Tetris:
         self.paused = False
         self.game_over = False
 
-        # 7-bag randomizer state
-        self.bag = []
+        # Rotation feedback (thin white outline for a few frames)
+        self.rotate_flash = 0
 
-        # Active/next piece & UI status
+        # Next piece is generated using LEVEL-AWARE WEIGHTS (see piece_weights)
         self.current = None
-        self.next_piece = self.random_piece()
-        self.rotate_flash = 0  # short-lived visual highlight after rotation
+        self.next_piece = self.weighted_random_piece()
         self.status_var.set("Ready. Good luck!")
 
         self.spawn_new_piece()
@@ -184,23 +194,60 @@ class Tetris:
         self.draw()
         self.schedule_tick()
 
-    def random_piece(self):
-        # 7-bag: refill with all 7 types in random order when empty
-        if not self.bag:
-            self.bag = list(self.SHAPES.keys())
-            random.shuffle(self.bag)
-        t = self.bag.pop()
-        return {'type': t, 'rot': 0, 'x': 0, 'y': 0}
+    # -------------------- Level-Aware Spawning --------------------
+    def piece_weights(self):
+        """
+        Return a dict of weights for each piece type based on current level.
+        Idea: as level increases, slightly favor 'awkward' pieces (S,Z,J,L),
+        and slightly reduce easy stabilizers (I,O). T stays neutral.
+        """
+        L = max(1, self.level)
+        # Gentle scaling: +5% per level for S,Z,J,L; -3% per level for I,O (floored at 0.4)
+        inc = 1.0 + 0.05 * (L - 1)
+        dec = max(0.4, 1.1 - 0.03 * (L - 1))
+        weights = {
+            'I': dec,
+            'O': dec,
+            'T': 1.0,
+            'S': inc,
+            'Z': inc,
+            'J': inc,
+            'L': inc,
+        }
+        return weights
+
+    def weighted_random_piece(self):
+        """
+        Choose next piece by weighted random using level-aware weights.
+        This replaces a strict 7-bag to inject a gentle difficulty curve.
+        """
+        w = self.piece_weights()
+        types = list(self.SHAPES.keys())
+        probs = [w[t] for t in types]
+        total = sum(probs)
+        r = random.uniform(0, total)
+        upto = 0.0
+        for t, p in zip(types, probs):
+            if upto + p >= r:
+                return {'type': t, 'rot': 0, 'x': 0, 'y': 0}
+            upto += p
+        # fallback
+        return {'type': random.choice(types), 'rot': 0, 'x': 0, 'y': 0}
 
     def spawn_new_piece(self):
-        # Bring in next piece and center it horizontally based on its width
+        """
+        Bring in next piece and center it horizontally by actual piece width.
+        This keeps I/O-centered properly instead of a fixed offset.
+        """
         self.current = self.next_piece
         self.current['rot'] = 0
         mat0 = self.SHAPES[self.current['type']][0]
         piece_w = len(mat0[0])
-        self.current['x'] = (self.COLS - piece_w) // 2  # center by width
+        self.current['x'] = (self.COLS - piece_w) // 2
         self.current['y'] = 0
-        self.next_piece = self.random_piece()
+
+        # Prepare the following piece with level-aware weighting
+        self.next_piece = self.weighted_random_piece()
 
         # Immediate collision at spawn = game over
         if self.collides(self.current['x'], self.current['y'], self.current['rot']):
@@ -216,10 +263,9 @@ class Tetris:
             return
 
         t = self.current['type']
-        # O-piece has only one state; still allow 'flash' so the key feels responsive
         rot = (self.current['rot'] + dir_) % len(self.SHAPES[t])
 
-        # Try rotating in place; if blocked, nudge left/right (naive wall-kick)
+        # Try in-place, then nudge left/right (naive wall-kick)
         for dx in (0, -1, 1, -2, 2):
             if not self.collides(self.current['x'] + dx, self.current['y'], rot):
                 self.current['rot'] = rot
@@ -229,7 +275,7 @@ class Tetris:
                 self.draw()
                 return
 
-        # All kicks failed → no rotation
+        # No rotation possible here
         self.root.bell()
         self.status_var.set("Rotation blocked")
 
@@ -250,7 +296,10 @@ class Tetris:
             self.lock_piece()
 
     def hard_drop(self):
-        """Instantly drop to the floor; reward small points per row."""
+        """
+        Instantly drop to the floor.
+        LEVEL-AWARE scoring: reward 'dropped rows × level'.
+        """
         if self.paused or self.game_over:
             return
         dropped = 0
@@ -258,7 +307,7 @@ class Tetris:
             self.current['y'] += 1
             dropped += 1
         if dropped:
-            self.score += dropped
+            self.score += dropped * self.level
         self.lock_piece()
 
     # -------------------- Gravity / Tick --------------------
@@ -307,7 +356,14 @@ class Tetris:
         return False
 
     def lock_piece(self):
-        """Merge active piece into the grid, clear lines, update score/level, then spawn next."""
+        """
+        Merge active piece into the grid, clear lines, update score/level, then spawn next.
+
+        LEVEL-AWARE SCORING:
+        - Line clear points are multiplied by current level.
+          (e.g., clearing a single line at level 3 yields 100 * 3 = 300 points)
+        - Gravity speeds up ~40ms per level, floored at 80ms.
+        """
         t = self.current['type']
         col = self.COLORS[t]
         mat = self.shape_matrix(t, self.current['rot'])
@@ -320,17 +376,18 @@ class Tetris:
                     if 0 <= gy < self.ROWS and 0 <= gx < self.COLS:
                         self.grid[gy][gx] = col
 
-        # Clear complete lines and award points (classic-ish table)
+        # Clear complete lines and award points (with level multiplier)
         lines = self.clear_lines()
         if lines:
             self.lines_cleared += lines
-            self.score += [0, 100, 300, 500, 800][lines]  # 0, single, double, triple, tetris
+            self.score += self.LINE_POINTS[lines] * self.level
 
             # Level up every 10 lines; speed up gravity but never below 80ms
             new_level = 1 + self.lines_cleared // 10
             if new_level != self.level:
                 self.level = new_level
                 self.gravity = max(80, self.TICK_MS - (self.level - 1) * 40)
+                self.status_var.set(f"Level up! Level {self.level}")
 
         self.spawn_new_piece()
         self.update_side()
