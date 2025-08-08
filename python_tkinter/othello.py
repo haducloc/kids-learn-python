@@ -20,7 +20,7 @@ class Othello:
     def __init__(self):
         """Initialize the game window, board state, and create GUI elements."""
         self.BOARD_SIZE = 8       # Can be changed to 16 etc. for larger boards
-        self.show_hints = True    # Toggle whether to highlight valid moves
+        self.show_hints = False    # Toggle whether to highlight valid moves
 
         # Set up main window
         self.window = tk.Tk()
@@ -35,7 +35,7 @@ class Othello:
         canvas_size = self.BOARD_SIZE * self.CELL_SIZE
         self.canvas = tk.Canvas(self.window, width=canvas_size, height=canvas_size, bg="green")
         self.canvas.pack()
-        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_click)
 
         # Restart button
         self.restart_button = tk.Button(
