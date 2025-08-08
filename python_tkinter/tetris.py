@@ -1,6 +1,5 @@
 import tkinter as tk
 import random
-from math import ceil
 
 class Tetris:
     COLS = 10
@@ -118,9 +117,13 @@ class Tetris:
         tk.Label(self.side, textvariable=self.score_var, font=("Consolas", 14)).pack(pady=4)
         tk.Label(self.side, textvariable=self.level_var, font=("Consolas", 14)).pack(pady=4)
         tk.Label(self.side, textvariable=self.lines_var, font=("Consolas", 14)).pack(pady=4)
-        tk.Label(self.side, text="Next:", font=("Consolas", 12)).pack(pady=(10,2))
-        self.preview_canvas = tk.Canvas(self.side, width=6*self.CELL, height=6*self.CELL, bg="#222")
+
+        # NEXT PREVIEW (now shows next 3 pieces stacked vertically)
+        tk.Label(self.side, text="Next (x3):", font=("Consolas", 12)).pack(pady=(10,2))
+        # Height = three 6xCELL boxes + small spacing
+        self.preview_canvas = tk.Canvas(self.side, width=6*self.CELL, height=3*6*self.CELL + 8, bg="#222")
         self.preview_canvas.pack(pady=4)
+
         tk.Label(self.side, textvariable=self.status_var, font=("Consolas", 11),
                  fg="#ccc", wraplength=180, justify="left").pack(pady=8)
 
@@ -184,12 +187,11 @@ class Tetris:
         # Rotation feedback (thin white outline for a few frames)
         self.rotate_flash = 0
 
-        # Next piece is generated using LEVEL-AWARE WEIGHTS (see piece_weights)
-        self.current = None
-        self.next_piece = self.weighted_random_piece()
-        self.status_var.set("Ready. Good luck!")
+        # NEXT QUEUE (3 upcoming pieces). We use weighted sampling by level.
+        self.next_queue = [self.weighted_random_piece() for _ in range(3)]
 
-        self.spawn_new_piece()
+        self.status_var.set("Ready. Good luck!")
+        self.spawn_new_piece()          # pulls first item from next_queue
         self.update_side()
         self.draw()
         self.schedule_tick()
@@ -197,15 +199,13 @@ class Tetris:
     # -------------------- Level-Aware Spawning --------------------
     def piece_weights(self):
         """
-        Return a dict of weights for each piece type based on current level.
-        Idea: as level increases, slightly favor 'awkward' pieces (S,Z,J,L),
-        and slightly reduce easy stabilizers (I,O). T stays neutral.
+        Return weights for each piece type based on current level.
+        Slightly favors S/Z/J/L as levels rise; slightly reduces I/O.
         """
         L = max(1, self.level)
-        # Gentle scaling: +5% per level for S,Z,J,L; -3% per level for I,O (floored at 0.4)
-        inc = 1.0 + 0.05 * (L - 1)
-        dec = max(0.4, 1.1 - 0.03 * (L - 1))
-        weights = {
+        inc = 1.0 + 0.05 * (L - 1)             # +5% per level for S/Z/J/L
+        dec = max(0.4, 1.1 - 0.03 * (L - 1))   # -3% per level for I/O (min 0.4)
+        return {
             'I': dec,
             'O': dec,
             'T': 1.0,
@@ -214,13 +214,9 @@ class Tetris:
             'J': inc,
             'L': inc,
         }
-        return weights
 
     def weighted_random_piece(self):
-        """
-        Choose next piece by weighted random using level-aware weights.
-        This replaces a strict 7-bag to inject a gentle difficulty curve.
-        """
+        """Choose next piece using level-aware weights."""
         w = self.piece_weights()
         types = list(self.SHAPES.keys())
         probs = [w[t] for t in types]
@@ -231,25 +227,26 @@ class Tetris:
             if upto + p >= r:
                 return {'type': t, 'rot': 0, 'x': 0, 'y': 0}
             upto += p
-        # fallback
         return {'type': random.choice(types), 'rot': 0, 'x': 0, 'y': 0}
 
     def spawn_new_piece(self):
         """
-        Bring in next piece and center it horizontally by actual piece width.
-        This keeps I/O-centered properly instead of a fixed offset.
+        Pull the next piece from the queue, center it based on width,
+        then push a freshly-weighted piece to the end of the queue.
         """
-        self.current = self.next_piece
+        self.current = self.next_queue.pop(0)
         self.current['rot'] = 0
+
+        # Center horizontally by actual piece width for nicer spawn
         mat0 = self.SHAPES[self.current['type']][0]
         piece_w = len(mat0[0])
         self.current['x'] = (self.COLS - piece_w) // 2
         self.current['y'] = 0
 
-        # Prepare the following piece with level-aware weighting
-        self.next_piece = self.weighted_random_piece()
+        # Refill queue tail
+        self.next_queue.append(self.weighted_random_piece())
 
-        # Immediate collision at spawn = game over
+        # If we collide at spawn, it's game over
         if self.collides(self.current['x'], self.current['y'], self.current['rot']):
             self.game_over = True
             self.set_title("Game Over! Press Restart.")
@@ -261,10 +258,8 @@ class Tetris:
         """Rotate current piece with simple wall-kick. dir_=+1 (CW), -1 (CCW)."""
         if self.paused or self.game_over:
             return
-
         t = self.current['type']
         rot = (self.current['rot'] + dir_) % len(self.SHAPES[t])
-
         # Try in-place, then nudge left/right (naive wall-kick)
         for dx in (0, -1, 1, -2, 2):
             if not self.collides(self.current['x'] + dx, self.current['y'], rot):
@@ -274,8 +269,6 @@ class Tetris:
                 self.status_var.set("Rotated CW" if dir_ > 0 else "Rotated CCW")
                 self.draw()
                 return
-
-        # No rotation possible here
         self.root.bell()
         self.status_var.set("Rotation blocked")
 
@@ -296,10 +289,7 @@ class Tetris:
             self.lock_piece()
 
     def hard_drop(self):
-        """
-        Instantly drop to the floor.
-        LEVEL-AWARE scoring: reward 'dropped rows × level'.
-        """
+        """Instantly drop to the floor; reward small points per row * level."""
         if self.paused or self.game_over:
             return
         dropped = 0
@@ -320,13 +310,10 @@ class Tetris:
         if self.paused or self.game_over:
             self.schedule_tick()
             return
-
         if not self.step_down():
             self.lock_piece()
-
         if self.rotate_flash > 0:
             self.rotate_flash -= 1
-
         self.schedule_tick()
 
     def step_down(self):
@@ -361,8 +348,7 @@ class Tetris:
 
         LEVEL-AWARE SCORING:
         - Line clear points are multiplied by current level.
-          (e.g., clearing a single line at level 3 yields 100 * 3 = 300 points)
-        - Gravity speeds up ~40ms per level, floored at 80ms.
+        - Gravity speeds up ~40ms per level (min 80ms).
         """
         t = self.current['type']
         col = self.COLORS[t]
@@ -381,7 +367,6 @@ class Tetris:
         if lines:
             self.lines_cleared += lines
             self.score += self.LINE_POINTS[lines] * self.level
-
             # Level up every 10 lines; speed up gravity but never below 80ms
             new_level = 1 + self.lines_cleared // 10
             if new_level != self.level:
@@ -405,7 +390,6 @@ class Tetris:
     # -------------------- Rendering --------------------
     def draw(self):
         self.canvas.delete("all")
-
         # Draw background grid and settled blocks
         for r in range(self.ROWS):
             for c in range(self.COLS):
@@ -441,19 +425,25 @@ class Tetris:
         self.level_var.set(f"Level: {self.level}")
         self.lines_var.set(f"Lines: {self.lines_cleared}")
 
-        # Draw "next" preview at a fixed offset
+        # Draw the next 3 pieces stacked in the preview canvas.
+        # Each block gets a 6xCELL tall area; we offset each by k * 6*CELL.
         self.preview_canvas.delete("all")
-        t = self.next_piece['type']
-        col = self.COLORS[t]
-        mat = self.shape_matrix(t, 0)
-        offx = 1; offy = 1
-        for i, row in enumerate(mat):
-            for j, cell in enumerate(row):
-                if cell:
-                    x1 = (offx + j) * self.CELL; y1 = (offy + i) * self.CELL
-                    x2 = x1 + self.CELL; y2 = y1 + self.CELL
-                    self.preview_canvas.create_rectangle(x1 + 1, y1 + 1, x2 - 1, y2 - 1,
-                                                         outline="", fill=col)
+        for k, piece in enumerate(self.next_queue[:3]):
+            t = piece['type']
+            col = self.COLORS[t]
+            mat = self.shape_matrix(t, 0)
+            offx = 1
+            offy = 1 + k * 6  # vertical stack (6 cells tall per preview slot)
+            for i, row in enumerate(mat):
+                for j, cell in enumerate(row):
+                    if cell:
+                        x1 = (offx + j) * self.CELL
+                        y1 = (offy + i) * self.CELL
+                        x2 = x1 + self.CELL
+                        y2 = y1 + self.CELL
+                        self.preview_canvas.create_rectangle(
+                            x1 + 1, y1 + 1, x2 - 1, y2 - 1, outline="", fill=col
+                        )
 
     # -------------------- Misc --------------------
     def set_title(self, msg):
