@@ -47,6 +47,7 @@ class Othello:
         # Initialize board and game state
         self.board = [[0 for _ in range(self.BOARD_SIZE)] for _ in range(self.BOARD_SIZE)]
         self.current_player = 1  # 1 = Black (human), -1 = White (AI)
+        self.game_over = False
 
         self.start_new_game()
 
@@ -67,10 +68,13 @@ class Othello:
         self.current_player = 1
         self.restart_button.config(state=tk.DISABLED)
         self.set_message("Your turn (Black)")
+        self.game_over = False
         self.draw_board()
 
     def on_canvas_click(self, event):
         """Handle mouse click and translate it to a board position."""
+        if self.current_player != 1 or self.game_over:
+            return
         col = event.x // self.CELL_SIZE
         row = event.y // self.CELL_SIZE
         self.player_move(row, col)
@@ -162,6 +166,7 @@ class Othello:
                 self.announce_winner()
                 return
             self.set_message("No valid move. Switching to machine.")
+            self.current_player *= -1
             self.window.after(self.MOVE_DELAY, self.ai_turn)
             return
 
@@ -263,6 +268,7 @@ class Othello:
             result = "It's a tie!"
         self.set_message(f"Game over! {result} (Black: {black}, White: {white})")
         self.restart_button.config(state=tk.NORMAL)
+        self.game_over = True
 
     def run(self):
         """Start the game window event loop."""
