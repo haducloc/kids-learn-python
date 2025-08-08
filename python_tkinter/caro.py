@@ -1,19 +1,16 @@
 import tkinter as tk
 import tkinter.messagebox
-import random
 
 class Caro:
-    GRID_SIZE = 24          # Number of rows and columns on the board
-    WIN_LENGTH = 5          # Number of symbols in a row needed to win
-    CELL_SIZE = 32          # Size of each cell in pixels
+    GRID_SIZE = 24
+    WIN_LENGTH = 5
+    CELL_SIZE = 32
 
     def __init__(self):
-        # Initialize main window
         self.window = tk.Tk()
         self.window.title("Cờ Caro - 5 in a Row (Canvas)")
         self.window.resizable(False, False)
 
-        # Create canvas to draw the board
         self.canvas = tk.Canvas(
             self.window,
             width=self.GRID_SIZE * self.CELL_SIZE,
@@ -22,31 +19,28 @@ class Caro:
         )
         self.canvas.grid(row=1, column=0, columnspan=self.GRID_SIZE)
 
-        # Label to show messages like whose turn or who won
         self.message_label = tk.Label(self.window, text="", font=('normal', 14))
         self.message_label.grid(row=0, column=0, columnspan=self.GRID_SIZE, pady=5)
 
-        # Restart button to reset the game
         self.restart_button = tk.Button(
             self.window, text="Restart Game", font=('normal', 12),
             command=self.restart_game, state=tk.NORMAL
         )
         self.restart_button.grid(row=2, column=0, columnspan=self.GRID_SIZE, pady=5)
 
-        # Board: 2D list storing game state: 0 = empty, 1 = X, -1 = O
         self.board = [[0 for _ in range(self.GRID_SIZE)] for _ in range(self.GRID_SIZE)]
         self.current_player = 1  # 1 = human (X), -1 = AI (O)
         self.game_over = False
+        self.pressed_cell = None  # remember where mouse went down
 
-        # Bind mouse click event to board
-        self.canvas.bind("<Button-1>", self.handle_click)
+        # Mouse Down = pressed visual; Mouse Up = confirm move
+        self.canvas.bind("<Button-1>", self.on_press)
+        self.canvas.bind("<ButtonRelease-1>", self.on_release)
 
-        # Draw the grid and show starting message
-        self.draw_grid()
+        self.draw_board()
         self.set_message("Your turn (X)")
 
-    def draw_grid(self):
-        # Draw the grid lines on the canvas
+    def draw_board(self):
         self.canvas.delete("all")
         for i in range(self.GRID_SIZE):
             for j in range(self.GRID_SIZE):
@@ -56,86 +50,134 @@ class Caro:
                 y2 = y1 + self.CELL_SIZE
                 self.canvas.create_rectangle(x1, y1, x2, y2, outline="gray")
 
+                v = self.board[i][j]
+                if v != 0:
+                    cx = x1 + self.CELL_SIZE // 2
+                    cy = y1 + self.CELL_SIZE // 2
+                    self.canvas.create_text(
+                        cx, cy,
+                        text=("X" if v == 1 else "O"),
+                        font=('normal', 14, 'bold'),
+                        fill=("black" if v == 1 else "blue")
+                    )
+
+        # pressed feedback overlay (only on empty cell and human turn)
+        if self.pressed_cell and not self.game_over and self.current_player == 1:
+            r, c = self.pressed_cell
+            if self.board[r][c] == 0:
+                x1 = c * self.CELL_SIZE
+                y1 = r * self.CELL_SIZE
+                x2 = x1 + self.CELL_SIZE
+                y2 = y1 + self.CELL_SIZE
+                self.canvas.create_rectangle(x1, y1, x2, y2, fill="#e6e6e6", outline="gray")
+
     def restart_game(self):
-        # Reset the game state
         self.board = [[0 for _ in range(self.GRID_SIZE)] for _ in range(self.GRID_SIZE)]
         self.current_player = 1
         self.game_over = False
-        self.draw_grid()
+        self.pressed_cell = None
+        self.draw_board()
         self.set_message("Your turn (X)")
 
-    def handle_click(self, event):
-        # Handle player's click on the board
+    def on_press(self, event):
+        # ignore during AI turn or after game end; don't show pressed on occupied cells
         if self.game_over or self.current_player != 1:
             return
+        r = event.y // self.CELL_SIZE
+        c = event.x // self.CELL_SIZE
+        if not (0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE):
+            return
+        if self.board[r][c] != 0:
+            self.pressed_cell = None
+            self.draw_board()
+            return
+        self.pressed_cell = (r, c)
+        self.draw_board()
 
-        row = event.y // self.CELL_SIZE
-        col = event.x // self.CELL_SIZE
+    def on_release(self, event):
+        # commit only if release matches press; otherwise (if there was a press) beep
+        if self.game_over or self.current_player != 1:
+            self.pressed_cell = None
+            return
+        r = event.y // self.CELL_SIZE
+        c = event.x // self.CELL_SIZE
 
-        if not (0 <= row < self.GRID_SIZE and 0 <= col < self.GRID_SIZE):
+        # If release is outside the board, just clear the visual
+        if not (0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE):
+            self.pressed_cell = None
+            self.draw_board()
             return
 
-        if self.board[row][col] != 0:
-            return  # Cell already occupied
+        if self.pressed_cell is not None and self.pressed_cell == (r, c):
+            self.handle_move(r, c)
+        elif self.pressed_cell is not None:
+            self.window.bell()
 
-        self.make_move(row, col, 1)  # Player makes move
+        self.pressed_cell = None
+        self.draw_board()
+
+    def handle_move(self, row, col):
+        if not (0 <= row < self.GRID_SIZE and 0 <= col < self.GRID_SIZE):
+            return
+        if self.board[row][col] != 0:
+            return
+        self.make_move(row, col, 1)
         if not self.check_game_end(row, col):
             self.set_message("AI's turn (O)")
-            self.window.after(300, self.ai_move)  # AI makes move after delay
+            self.window.after(300, self.ai_move)
 
     def ai_move(self):
-        # Simple AI move logic
         if self.game_over:
             return
         move = self.best_ai_move()
-        if move:
-            row, col = move
-            self.make_move(row, col, -1)  # AI move
-            self.check_game_end(row, col)
+        if not move:
+            # AI has no valid move → pass turn back to human
+            self.set_message("AI has no move. Your turn (X)")
+            self.current_player = 1
+            return
+        r, c = move
+        self.make_move(r, c, -1)
+        self.check_game_end(r, c)
 
     def make_move(self, row, col, player):
-        # Place player's symbol on the board and draw it
         self.board[row][col] = player
         x = col * self.CELL_SIZE + self.CELL_SIZE // 2
         y = row * self.CELL_SIZE + self.CELL_SIZE // 2
-        symbol = "X" if player == 1 else "O"
-        color = "black" if player == 1 else "blue"
-        self.canvas.create_text(x, y, text=symbol, font=('normal', 14, 'bold'),
-                                fill=color)
-        self.current_player *= -1  # Switch turn
+        self.canvas.create_text(
+            x, y,
+            text=("X" if player == 1 else "O"),
+            font=('normal', 14, 'bold'),
+            fill=("black" if player == 1 else "blue")
+        )
+        self.current_player *= -1  # swap turns
 
     def check_game_end(self, row, col):
-        # Check if the game is over (win or draw)
         if self.check_win(row, col):
             winner = "X" if self.board[row][col] == 1 else "O"
             self.set_message(f"Game over! Player {winner} wins!")
             self.game_over = True
             return True
 
-        # Check for draw
         if all(self.board[i][j] != 0 for i in range(self.GRID_SIZE) for j in range(self.GRID_SIZE)):
             self.set_message("Game over! It's a draw.")
             self.game_over = True
             return True
 
-        # Otherwise, continue
         self.set_message("Your turn (X)" if self.current_player == 1 else "AI's turn (O)")
         return False
 
     def set_message(self, text):
-        # Display a message above the board
         self.message_label.config(text=text)
 
     def check_win(self, row, col):
-        # Check if there's a winning line from this cell
+        # 5-in-a-row if current cell connects to >= WIN_LENGTH across any axis
         return any(
             1 + self.count_in_direction(row, col, dr, dc) +
             self.count_in_direction(row, col, -dr, -dc) >= self.WIN_LENGTH
-            for dr, dc in [(0, 1), (1, 0), (1, 1), (1, -1)]  # Horizontal, Vertical, Diagonal
+            for dr, dc in [(0, 1), (1, 0), (1, 1), (1, -1)]
         )
 
     def count_in_direction(self, row, col, dr, dc):
-        # Count how many same symbols in a direction (excluding the starting cell)
         count = 0
         player = self.board[row][col]
         r, c = row + dr, col + dc
@@ -146,13 +188,12 @@ class Caro:
         return count
 
     def best_ai_move(self):
-        # AI selects best move based on evaluation
+        # evaluate every empty cell; slight weight on blocking opponent
         best_score = float('-inf')
         best_move = None
         for i in range(self.GRID_SIZE):
             for j in range(self.GRID_SIZE):
                 if self.board[i][j] == 0:
-                    # Heuristic: favor own moves more, but slightly consider blocking player
                     score = self.evaluate_cell(i, j, -1) + self.evaluate_cell(i, j, 1) * 0.9
                     if score > best_score:
                         best_score = score
@@ -160,7 +201,6 @@ class Caro:
         return best_move
 
     def evaluate_cell(self, row, col, player):
-        # Evaluate a cell’s potential for the specified player
         total = 0
         for dr, dc in [(0, 1), (1, 0), (1, 1), (1, -1)]:
             count, blocks = self.count_sequence(row, col, dr, dc, player)
@@ -168,40 +208,42 @@ class Caro:
         return total
 
     def count_sequence(self, row, col, dr, dc, player):
-        # Count number of player's symbols and blockages around a point
+        # count contiguous stones including hypothetical at (row,col); track edge/stone blocks
         count = 1
         blocks = 0
 
-        # Forward direction
         r, c = row + dr, col + dc
         while 0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE:
             if self.board[r][c] == player:
                 count += 1
+                r += dr
+                c += dc
             elif self.board[r][c] == 0:
                 break
             else:
                 blocks += 1
                 break
-            r += dr
-            c += dc
+        if not (0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE):
+            blocks += 1
 
-        # Backward direction
         r, c = row - dr, col - dc
         while 0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE:
             if self.board[r][c] == player:
                 count += 1
+                r -= dr
+                c -= dc
             elif self.board[r][c] == 0:
                 break
             else:
                 blocks += 1
                 break
-            r -= dr
-            c -= dc
+        if not (0 <= r < self.GRID_SIZE and 0 <= c < self.GRID_SIZE):
+            blocks += 1
 
         return count, blocks
 
     def score_pattern(self, count, blocks):
-        # Assign a score to a pattern based on count and blockages
+        # high score for open-ended longer runs; reduced when blocked
         if count >= 5:
             return 100000
         if count == 4:
@@ -215,7 +257,6 @@ class Caro:
         return 0
 
     def run(self):
-        # Start the GUI event loop
         self.window.mainloop()
 
 
